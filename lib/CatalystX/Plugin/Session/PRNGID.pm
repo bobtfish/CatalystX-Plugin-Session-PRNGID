@@ -31,6 +31,7 @@ __PACKAGE__->mk_classdata('random_device', '/dev/random');
 #      ergo we get 16 PRNGs to get that much randomness
 #      Initializing a Math::Random::ISAAC state uses 256 seeds of 32
 #      bits (i.e. 4 bytes)
+#      Note that this means we need 16k of randomness to start up!
 sub setup_finalize {
     my $app = shift;
     $app->prng([ map { Math::Random::ISAAC->new( map { $app->generate_seed } 1..255) } 1..16 ]);
