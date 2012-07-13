@@ -1,9 +1,12 @@
 package CatalystX::Plugin::Session::PRNGID;
 
 use Moose;
+use Math::Random::ISAAC;
+use MRO::Compat;
+use namespace::clean -except => 'meta';
+
 extends 'Catalyst::Plugin::Session';
 with 'Catalyst::ClassData';
-use namespace::clean -except => 'meta';
 
 =head1 NAME
 
@@ -19,26 +22,27 @@ our $VERSION = '0.01';
 
 
 __PACKAGE__->mk_classdata('prng');
-__PACKAGE__->mk_classdata('iterations', 16);
 __PACKAGE__->mk_classdata('random_device', '/dev/random');
-    
 
-sub setup_finalize 
-{
+
+# N.B. Each Math::Random::ISAAC object outputs 32 bits of pseudo random
+#      number per round.
+#      We want to feed the digest algorithm one block, i.e. 512 bits
+#      ergo we get 16 PRNGs to get that much randomness
+#      Initializing a Math::Random::ISAAC state uses 256 seeds of 32
+#      bits (i.e. 4 bytes)
+sub setup_finalize {
     my $app = shift;
-    require Math::Random::ISAAC;
-    $app->prng(Math::Random::ISAAC->new($app->generate_seed));
-};
+    $app->prng([ map { Math::Random::ISAAC->new( map { $app->generate_seed } 1..255) } 1..16 ]);
+    $app->next::method(@_);
+}
 
-sub generate_seed
-{
+sub generate_seed {
     my $self = shift;
 
     open my $fh, "<", $self->random_device;
-    read $fh, my $bytes, 20;
+    read $fh, my $bytes, 4;
     close $fh;
-    # is this really the best format for the seed numbers?
-    # should I split it into chunks for the generator?
     return unpack("I*", $bytes);
 }
 
@@ -110,20 +114,11 @@ This initialises the prng at application startup.
 
 =cut
 
-my $counter;
-override session_hash_seed => sub
-{
+sub session_hash_seed {
     my $c = shift;
 
-    # this is essentially the same as the existing plugin, just
-    # using a prng instead of rand and running it a few more times.
-    my @bits = ( ++$counter, time, $c->prng->rand, $$, {}, overload::StrVal($c), );
-    for (my $i = 0; $i < $c->iterations; $i++)
-    {
-        push @bits, $c->prng->rand;
-    }
-    return join "", @bits;
-};
+    return join '', map { pack("N", $_->irand) } @{ $c->prng };
+}
 
 =head1 AUTHOR
 
